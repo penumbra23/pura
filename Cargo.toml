@@ -1,0 +1,11 @@
+[package]
+name = "pura"
+version = "0.1.0"
+authors = ["penumrba23 <glbranimir@gmail.com>"]
+edition = "2018"
+keywords = ["containers", "container-runtime", "container-engine", "docker", "linux"]
+license = "MIT"
+license-file = "LICENSE"
+
+[dependencies]
+clap = "2.33.3"
