@@ -1,3 +1,6 @@
+mod core;
+mod oci;
+
 use clap::{App, Arg, SubCommand};
 
 pub fn main() {

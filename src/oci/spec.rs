@@ -1,7 +1,7 @@
-mod common;
-
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, convert::TryFrom, path::Path};
+
+use crate::core::common::{ErrorType, Error};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
