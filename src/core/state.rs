@@ -20,7 +20,7 @@ pub struct State {
     pub status: Status,
     pub pid: u64,
     pub bundle: String,
-    pub annotations: HashMap<String, String>,
+    pub annotations: Option<HashMap<String, String>>,
 }
 
 const OCI_VERSION: &str = "1.0.2";
@@ -33,7 +33,7 @@ impl State {
             pid: pid,
             status: Status::Creating,
             bundle: bundle.clone(),
-            annotations: HashMap::<String, String>::new(),
+            annotations: Some(HashMap::<String, String>::new()),
         }
     }
 
