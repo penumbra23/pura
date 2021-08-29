@@ -3,3 +3,4 @@ pub mod common;
 pub mod logger;
 pub mod state;
 pub mod fork;
+pub mod hooks;
