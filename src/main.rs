@@ -86,7 +86,7 @@ pub fn create(create: Create) {
     state.pid = i32::from(pid) as u64;
     state.save(container_path).unwrap();
 
-    // TODO: execute all hooks
+    // TODO: move to start op
     if let Some(hooks) = &spec.hooks {
         if let Some(prestart) = &hooks.prestart {
             for pre_hook in prestart {

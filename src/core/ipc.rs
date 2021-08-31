@@ -16,7 +16,7 @@ impl IpcParent {
     pub fn new(path: &String) -> Result<IpcParent> {
         let socket_raw_fd = socket(
             AddressFamily::Unix,
-            SockType::Stream,
+            SockType::SeqPacket,
             SockFlag::SOCK_CLOEXEC,
             None,
         )
@@ -35,8 +35,8 @@ impl IpcParent {
             err_type: ErrorType::Runtime,
         })?;
 
-        listen(socket_raw_fd, 10).map_err(|_| Error {
-            msg: "unable to listen IPC socket".to_string(),
+        listen(socket_raw_fd, 10).map_err(|err| Error {
+            msg: format!("unable to listen IPC socket {}", err),
             err_type: ErrorType::Runtime,
         })?;
         Ok(IpcParent {
@@ -90,7 +90,7 @@ impl IpcChild {
     pub fn new(path: &String) -> Result<IpcChild> {
         let socket_raw_fd = socket(
             AddressFamily::Unix,
-            SockType::Stream,
+            SockType::SeqPacket,
             SockFlag::SOCK_CLOEXEC,
             None,
         )
