@@ -93,6 +93,9 @@ pub struct Mount {
 #[serde(rename_all = "camelCase")]
 pub struct Hooks {
     pub prestart: Option<Vec<Hook>>,
+    pub create_runtime: Option<Vec<Hook>>,
+    pub create_container: Option<Vec<Hook>>,
+    pub start_container: Option<Vec<Hook>>,
     pub poststart: Option<Vec<Hook>>,
     pub poststop: Option<Vec<Hook>>,
 }

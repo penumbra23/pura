@@ -3,14 +3,7 @@ mod oci;
 
 use std::{convert::TryFrom, io::Write, path::Path};
 
-use crate::core::{
-    common::{exit, exit_msg},
-    fork::clone_child,
-    hooks::exec_hook,
-    ipc::IpcParent,
-    state::{State, Status},
-    terminal::PtySocket,
-};
+use crate::core::{common::{exit, exit_msg}, fork::{clone_child, signal}, hooks::exec_hook, ipc::IpcParent, state::{State, Status}, terminal::PtySocket};
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use log::{error, info};
@@ -97,8 +90,15 @@ pub fn create(create: Create) {
     if let Some(hooks) = &spec.hooks {
         if let Some(prestart) = &hooks.prestart {
             for pre_hook in prestart {
-                // TODO: check if child needs to be killed
                 exec_hook(pre_hook, &state).expect("prestart hook failed");
+                signal(pid, 9).unwrap();
+            }
+        }
+
+        if let Some(create_runtime) = &hooks.create_runtime {
+            for cr_hook in create_runtime {
+                exec_hook(cr_hook, &state).expect("create_runtime hook failed");
+                signal(pid, 9).unwrap();
             }
         }
     }
