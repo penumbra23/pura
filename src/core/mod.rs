@@ -5,3 +5,4 @@ pub mod state;
 pub mod fork;
 pub mod hooks;
 pub mod terminal;
+pub mod filesystem;
