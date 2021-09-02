@@ -1,12 +1,13 @@
 mod core;
 mod oci;
 
-use std::{convert::TryFrom, io::Write, path::Path};
+use std::{convert::TryFrom, ffi::CString, io::Write, path::Path};
 
-use crate::core::{common::{exit, exit_msg}, fork::{clone_child, signal}, hooks::exec_hook, ipc::IpcParent, state::{State, Status}, terminal::PtySocket};
+use crate::core::{common::{exit, exit_msg}, filesystem::{create_default_devices, create_devices, mount_devices, mount_rootfs, symlinks_defaults}, fork::{clone_child, signal}, hooks::exec_hook, ipc::{IpcChild, IpcParent}, state::{State, Status}, terminal::{Pty, PtySocket}};
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use log::{error, info};
+use nix::unistd::{Gid, Uid, chdir, execvp, setgid, sethostname, setuid};
 use oci::{ops::Create, spec::Spec};
 
 pub fn create(create: Create) {
@@ -58,7 +59,136 @@ pub fn create(create: Create) {
     let init_lock_path = format!("{}/init.sock", container_path_str);
     let init_lock = IpcParent::new(&init_lock_path).unwrap();
 
-    let pid = clone_child(|| 0).expect("error forking child");
+    let pid = clone_child(|| {
+        let sock_path = container_path
+            .join("run.sock")
+            .as_os_str()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        // start_lock waits for the host start command
+        let start_lock = IpcParent::new(&sock_path).unwrap();
+        let init_lock_child = IpcChild::new(&init_lock_path).unwrap();
+
+        let rootfs = Path::new(&spec.root.path);
+
+        let pty: Option<Pty> = if has_terminal {
+            match Pty::new() {
+                Ok(pty) => {
+                    pty.connect().unwrap();
+                    pty_console.as_ref().unwrap().send_pty(&pty).unwrap();
+                    Some(pty)
+                },
+                Err(err) => {
+                    init_lock_child.notify(&format!("error setting up terminal {}", err)).unwrap();
+                    exit_msg(1, format!("error setting up terminal {}", err));
+                },
+            }
+        } else {
+            None
+        };
+
+        // Mounts the rootfs folder with bind option
+        match mount_rootfs(&rootfs) {
+            Ok(_) => (),
+            Err(err) => {
+                init_lock_child.notify(&format!("error mounting rootfs {}", err)).unwrap();
+                exit_msg(1, format!("error  mounting rootfs {}", err));
+            },
+        }
+
+        if let Some(mounts) = &spec.mounts {
+            match mount_devices(&mounts, rootfs) {
+                Ok(_) => (),
+                Err(err) => {
+                    init_lock_child.notify(&format!("error mounting devices {}", err)).unwrap();
+                    exit_msg(1, format!("error  mounting devices {}", err));
+                },
+            }
+        }
+
+        if let Some(linux) = &spec.linux {
+            if let Some(devices) = &linux.devices {
+                match create_devices(&devices, rootfs) {
+                    Ok(_) => info!("linux devices successfully created"),
+                    Err(err) => {
+                        init_lock_child.notify(&format!("error creating devices {}", err)).unwrap();
+                        exit_msg(1, format!("error creating devices {}", err));
+                    },
+                }
+            }
+        }
+        // Create default devices and mounts
+        create_default_devices(&rootfs);
+
+        // Symlinks the file descriptors of the process
+        symlinks_defaults(&rootfs);
+
+        match mount_rootfs(&rootfs) {
+            Ok(_) => (),
+            Err(err) => {
+                init_lock_child.notify(&format!("error pivot_root {}", err)).unwrap();
+                exit_msg(1, format!("error pivot_root {}", err));
+            }
+        }
+
+        init_lock_child.notify(&"0".to_string()).unwrap();
+        init_lock_child.close().unwrap();
+
+        if let Some(hostname) = &spec.hostname {
+            sethostname(hostname).unwrap();
+        }
+
+        // Here gets the process executed
+        if let Some(process) = &spec.process {
+            let cmd = &process.args.as_ref().unwrap()[0];
+            let args: Vec<CString> = spec
+                .process
+                .as_ref()
+                .unwrap()
+                .args
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|a| CString::new(a.to_string()).unwrap_or_default())
+                .collect();
+
+            let exec = CString::new(cmd.as_bytes()).unwrap();
+
+            if let Some(envs) = &process.env {
+                for (key, _) in std::env::vars() {
+                    std::env::remove_var(key);
+                }
+
+                for env in envs {
+                    if let Some((key, value)) = env.split_once("=") {
+                        std::env::set_var(key, value);
+                    }
+                }
+            }
+
+            start_lock.wait().unwrap_or(String::new());
+            start_lock.close().unwrap_or(());
+
+            if let Some(user) = &process.user {
+                setuid(Uid::from_raw(user.uid as u32)).unwrap();
+                setgid(Gid::from_raw(user.gid as u32)).unwrap();
+            }
+
+            chdir(Path::new(&process.cwd)).unwrap();
+            match execvp(&exec, &args) {
+                Ok(_) => (),
+                Err(err) => {
+                    // We can't log this error because it doesn't see the log file
+                    println!("[ERROR]: {}", err.to_string());
+                    exit(1);
+                }
+            }
+        }
+
+        0
+    }).expect("error forking child");
 
     // Wait until child prepares for command execution
     match init_lock.wait() {
