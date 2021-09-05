@@ -3,12 +3,29 @@ mod oci;
 
 use std::{convert::TryFrom, ffi::CString, io::Write, path::Path};
 
-use crate::core::{common::{exit, exit_msg}, filesystem::{create_default_devices, create_devices, mount_devices, mount_rootfs, symlinks_defaults}, fork::{clone_child, signal}, hooks::exec_hook, ipc::{IpcChild, IpcParent}, state::{State, Status}, terminal::{Pty, PtySocket}};
+use crate::core::state::State as ContainerState;
 
-use clap::{App, Arg, ArgMatches, SubCommand};
+use crate::core::{
+    common::{exit, exit_msg},
+    filesystem::{
+        create_default_devices, create_devices, mount_devices, mount_rootfs, symlinks_defaults,
+    },
+    fork::{clone_child, signal},
+    hooks::exec_hook,
+    ipc::{IpcChild, IpcParent},
+    state::Status,
+    terminal::{Pty, PtySocket},
+};
+
+use clap::{App, Arg, SubCommand};
 use log::{error, info};
-use nix::unistd::{Gid, Uid, chdir, execvp, setgid, sethostname, setuid};
-use oci::{ops::Create, spec::Spec};
+use nix::unistd::{chdir, execvp, setgid, sethostname, setuid, Gid, Uid};
+use oci::{
+    ops::{Create, Delete, Kill, Start, State},
+    spec::Spec,
+};
+
+const PURA_ROOT_PATH: &str = "/tmp/pura";
 
 pub fn create(create: Create) {
     let container_id = create.id;
@@ -40,7 +57,7 @@ pub fn create(create: Create) {
         .open(create.pid_file)
         .unwrap();
 
-    let state = State::new(&container_id.to_string(), 0, &bundle.to_string());
+    let state = ContainerState::new(&container_id.to_string(), 0, &bundle.to_string());
     let container_path_str = format!("{}/{}", &root, container_id);
     let container_path = Path::new(&container_path_str);
     state.save(container_path).unwrap();
@@ -79,11 +96,13 @@ pub fn create(create: Create) {
                     pty.connect().unwrap();
                     pty_console.as_ref().unwrap().send_pty(&pty).unwrap();
                     Some(pty)
-                },
+                }
                 Err(err) => {
-                    init_lock_child.notify(&format!("error setting up terminal {}", err)).unwrap();
+                    init_lock_child
+                        .notify(&format!("error setting up terminal {}", err))
+                        .unwrap();
                     exit_msg(1, format!("error setting up terminal {}", err));
-                },
+                }
             }
         } else {
             None
@@ -93,18 +112,22 @@ pub fn create(create: Create) {
         match mount_rootfs(&rootfs) {
             Ok(_) => (),
             Err(err) => {
-                init_lock_child.notify(&format!("error mounting rootfs {}", err)).unwrap();
+                init_lock_child
+                    .notify(&format!("error mounting rootfs {}", err))
+                    .unwrap();
                 exit_msg(1, format!("error  mounting rootfs {}", err));
-            },
+            }
         }
 
         if let Some(mounts) = &spec.mounts {
             match mount_devices(&mounts, rootfs) {
                 Ok(_) => (),
                 Err(err) => {
-                    init_lock_child.notify(&format!("error mounting devices {}", err)).unwrap();
+                    init_lock_child
+                        .notify(&format!("error mounting devices {}", err))
+                        .unwrap();
                     exit_msg(1, format!("error  mounting devices {}", err));
-                },
+                }
             }
         }
 
@@ -113,9 +136,11 @@ pub fn create(create: Create) {
                 match create_devices(&devices, rootfs) {
                     Ok(_) => info!("linux devices successfully created"),
                     Err(err) => {
-                        init_lock_child.notify(&format!("error creating devices {}", err)).unwrap();
+                        init_lock_child
+                            .notify(&format!("error creating devices {}", err))
+                            .unwrap();
                         exit_msg(1, format!("error creating devices {}", err));
-                    },
+                    }
                 }
             }
         }
@@ -128,7 +153,9 @@ pub fn create(create: Create) {
         match mount_rootfs(&rootfs) {
             Ok(_) => (),
             Err(err) => {
-                init_lock_child.notify(&format!("error pivot_root {}", err)).unwrap();
+                init_lock_child
+                    .notify(&format!("error pivot_root {}", err))
+                    .unwrap();
                 exit_msg(1, format!("error pivot_root {}", err));
             }
         }
@@ -188,7 +215,8 @@ pub fn create(create: Create) {
         }
 
         0
-    }).expect("error forking child");
+    })
+    .expect("error forking child");
 
     // Wait until child prepares for command execution
     match init_lock.wait() {
@@ -211,7 +239,7 @@ pub fn create(create: Create) {
     pid_file.write_all(format!("{}", pid).as_bytes()).unwrap();
 
     // Update state
-    let mut state = State::try_from(container_path).unwrap();
+    let mut state = ContainerState::try_from(container_path).unwrap();
     state.status = Status::Created;
     state.pid = i32::from(pid) as u64;
     state.save(container_path).unwrap();
@@ -242,13 +270,38 @@ pub fn create(create: Create) {
     }
 }
 
-pub fn start(args: &ArgMatches) {}
+pub fn start(start: Start) {
+    let container_path = Path::new(&start.root).join(&start.id);
 
-pub fn delete(args: &ArgMatches) {}
+    // TODO: check state
+    let mut state = ContainerState::try_from(container_path.as_path()).unwrap();
+    let sock_path = container_path
+        .join("run.sock")
+        .as_os_str()
+        .to_str()
+        .unwrap()
+        .to_string();
 
-pub fn kill(args: &ArgMatches) {}
+    let sock = IpcChild::new(&sock_path).unwrap();
 
-pub fn state(args: &ArgMatches) {}
+    sock.notify(&"start".to_string()).unwrap();
+    sock.close().unwrap();
+
+    state.status = Status::Running;
+    state.save(container_path.as_path()).unwrap();
+}
+
+pub fn delete(delete: Delete) {
+    // TODO: implement
+}
+
+pub fn kill(kill: Kill) {
+    // TODO: implement
+}
+
+pub fn state(state: State) {
+    // TODO: implement
+}
 
 pub fn main() {
     let matches = App::new("pura")
@@ -352,17 +405,46 @@ pub fn main() {
                     .value_of("console-socket")
                     .map(|s| Some(s.to_string()))
                     .unwrap_or(None),
-                root: args.value_of("root").unwrap_or("/tmp/pura").to_string(),
+                root: args.value_of("root").unwrap_or(PURA_ROOT_PATH).to_string(),
                 pid_file: args
                     .value_of("pid-file")
                     .expect("pid-file is required")
                     .to_string(),
             })
         }
-        ("start", start_cmd) => start(start_cmd.unwrap()),
-        ("delete", delete_cmd) => delete(delete_cmd.unwrap()),
-        ("kill", kill_cmd) => kill(kill_cmd.unwrap()),
-        ("state", state_cmd) => state(state_cmd.unwrap()),
+        ("start", start_cmd) => {
+            let args = start_cmd.unwrap();
+            start(Start {
+                id: args.value_of("id").expect("id is required").to_string(),
+                root: args.value_of("root").unwrap_or(PURA_ROOT_PATH).to_string(),
+            })
+        }
+        ("delete", delete_cmd) => {
+            let args = delete_cmd.unwrap();
+            delete(Delete {
+                id: args.value_of("id").expect("id is required").to_string(),
+                root: args.value_of("root").unwrap_or(PURA_ROOT_PATH).to_string(),
+            })
+        }
+        ("kill", kill_cmd) => {
+            let args = kill_cmd.unwrap();
+            kill(Kill {
+                id: args.value_of("id").expect("id is required").to_string(),
+                root: args.value_of("root").unwrap_or(PURA_ROOT_PATH).to_string(),
+                signal: args
+                    .value_of("signal")
+                    .expect("signal is required")
+                    .parse()
+                    .expect("signal expected as integer"),
+            })
+        }
+        ("state", state_cmd) => {
+            let args = state_cmd.unwrap();
+            state(State {
+                id: args.value_of("id").expect("id is required").to_string(),
+                root: args.value_of("root").unwrap_or(PURA_ROOT_PATH).to_string(),
+            })
+        }
         (_, _) => exit_msg(1, "unknown container command"),
     }
 
