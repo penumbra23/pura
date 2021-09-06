@@ -19,7 +19,8 @@ use crate::core::{
 
 use clap::{App, Arg, SubCommand};
 use log::{error, info};
-use nix::unistd::{chdir, execvp, setgid, sethostname, setuid, Gid, Uid};
+use nix::sys::signal::Signal;
+use nix::unistd::{Gid, Pid, Uid, chdir, execvp, setgid, sethostname, setuid};
 use oci::{
     ops::{Create, Delete, Kill, Start, State},
     spec::Spec,
@@ -292,15 +293,51 @@ pub fn start(start: Start) {
 }
 
 pub fn delete(delete: Delete) {
-    // TODO: implement
+    let state_path = Path::new(&delete.root).join(&delete.id);
+
+    // TODO: check state if ready for deletion
+    let state = ContainerState::try_from(state_path.as_path()).unwrap();
+    std::fs::remove_dir_all(Path::new(&delete.root).join(&delete.id)).unwrap();
+}
+
+fn to_signal(sig: i32) -> Signal {
+    match sig {
+        1 => Signal::SIGHUP,
+        2 => Signal::SIGINT,
+        6 => Signal::SIGABRT,
+        9 => Signal::SIGKILL,
+        15 => Signal::SIGTERM,
+        17 => Signal::SIGCHLD,
+        _ => panic!("unknown signal"),
+    }
 }
 
 pub fn kill(kill: Kill) {
-    // TODO: implement
+    let state_path = Path::new(&kill.root).join(&kill.id);
+    let state = ContainerState::try_from(state_path.as_path()).unwrap();
+
+    if state.status != Status::Created && state.status != Status::Running {
+        exit(1);
+    }
+
+    match nix::sys::signal::kill(
+        Pid::from_raw(state.pid as i32),
+        to_signal(kill.signal),
+    ) {
+        Ok(_) => return,
+        Err(_) => exit(1),
+    }
 }
 
 pub fn state(state: State) {
-    // TODO: implement
+    let state_path = Path::new(&state.root).join(&state.id);
+
+    let state = ContainerState::try_from(state_path.as_path()).unwrap();
+
+    std::io::stdout()
+        .write_all(&serde_json::to_string(&state).unwrap().as_bytes())
+        .unwrap();
+    std::io::stdout().flush().unwrap();
 }
 
 pub fn main() {
