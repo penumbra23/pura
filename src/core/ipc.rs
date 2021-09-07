@@ -76,10 +76,6 @@ impl IpcParent {
 
         Ok(())
     }
-
-    pub fn fd(&self) -> i32 {
-        self.fd
-    }
 }
 
 pub struct IpcChild {
@@ -126,10 +122,6 @@ impl IpcChild {
             err_type: ErrorType::Runtime,
         })?;
         Ok(())
-    }
-
-    pub fn fd(&self) -> i32 {
-        self.fd
     }
 }
 

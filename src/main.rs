@@ -3,13 +3,13 @@ mod oci;
 
 use std::{convert::TryFrom, ffi::CString, io::Write, path::Path};
 
-use crate::core::filesystem::pivot_rootfs;
+use crate::core::logger::ContainerLogger;
 use crate::core::state::State as ContainerState;
 
 use crate::core::{
     common::{exit, exit_msg},
     filesystem::{
-        create_default_devices, create_devices, mount_devices, mount_rootfs, symlinks_defaults,
+        create_default_devices, create_devices, mount_devices, mount_rootfs, symlinks_defaults, pivot_rootfs
     },
     fork::{clone_child, signal},
     hooks::exec_hook,
@@ -19,7 +19,7 @@ use crate::core::{
 };
 
 use clap::{App, Arg, SubCommand};
-use log::{error, info};
+use log::{Level, error, info};
 use nix::sys::signal::Signal;
 use nix::unistd::{Gid, Pid, Uid, chdir, execvp, setgid, sethostname, setuid};
 use oci::{
@@ -440,6 +440,19 @@ pub fn main() {
             ),
         )
         .get_matches();
+
+    let mut log_path = matches.value_of("log").map(|s| s.to_string());
+
+    if log_path.is_none() {
+        if let Some(id) = matches.value_of("id") {
+            log_path = Some(format!("/tmp/pura/{}.log", id));
+        } else {
+            // This isn't likely to happen since each OCI runtime command has the id arg
+            log_path = Some(String::from("/tmp/pura/unknown.log"));
+        }
+    }
+
+    let _ = ContainerLogger::init(&log_path.unwrap(), Level::Info).unwrap();
 
     match matches.subcommand() {
         ("create", create_cmd) => {
