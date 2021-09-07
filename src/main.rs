@@ -3,6 +3,7 @@ mod oci;
 
 use std::{convert::TryFrom, ffi::CString, io::Write, path::Path};
 
+use crate::core::filesystem::pivot_rootfs;
 use crate::core::state::State as ContainerState;
 
 use crate::core::{
@@ -78,12 +79,7 @@ pub fn create(create: Create) {
     let init_lock = IpcParent::new(&init_lock_path).unwrap();
 
     let pid = clone_child(|| {
-        let sock_path = container_path
-            .join("run.sock")
-            .as_os_str()
-            .to_str()
-            .unwrap()
-            .to_string();
+        let sock_path = format!("{}/run.sock", container_path.display());
 
         // start_lock waits for the host start command
         let start_lock = IpcParent::new(&sock_path).unwrap();
@@ -151,7 +147,23 @@ pub fn create(create: Create) {
         // Symlinks the file descriptors of the process
         symlinks_defaults(&rootfs);
 
-        match mount_rootfs(&rootfs) {
+        if let Some(hooks) = &spec.hooks {
+            if let Some(create) = &hooks.create_container {
+                for create_hook in create {
+                    match exec_hook(create_hook, &state) {
+                        Ok(_) => todo!(),
+                        Err(err) => {
+                            init_lock_child
+                                .notify(&format!("error createContainer hook {}", err))
+                                .unwrap();
+                            exit_msg(1, format!("error createContainer hook {}", err));
+                        }
+                    }
+                }
+            }
+        }
+
+        match pivot_rootfs(&rootfs) {
             Ok(_) => (),
             Err(err) => {
                 init_lock_child
