@@ -286,8 +286,28 @@ pub fn create(create: Create) {
 pub fn start(start: Start) {
     let container_path = Path::new(&start.root).join(&start.id);
 
-    // TODO: check state
     let mut state = ContainerState::try_from(container_path.as_path()).unwrap();
+
+    let bundle = &state.bundle;
+    let spec = match Spec::try_from(Path::new(&bundle).join("config.json").as_path()) {
+        Ok(spec) => spec,
+        Err(err) => {
+            error!("{}", err);
+            exit(1);
+        }
+    };
+
+    // TODO: check state
+    // TODO: by the runtime spec the prestart hook needs to be executed here ?
+
+    if let Some(hooks) = &spec.hooks {
+        if let Some(start_container) = &hooks.start_container {
+            for hook in start_container {
+                exec_hook(hook, &state).expect("error executing startContainer hook");
+            }
+        }
+    }
+
     let sock_path = container_path
         .join("run.sock")
         .as_os_str()
@@ -302,6 +322,14 @@ pub fn start(start: Start) {
 
     state.status = Status::Running;
     state.save(container_path.as_path()).unwrap();
+
+    if let Some(hooks) = &spec.hooks {
+        if let Some(poststart) = &hooks.poststart {
+            for hook in poststart {
+                exec_hook(hook, &state).expect("error executing poststart hook");
+            }
+        }
+    }
 }
 
 pub fn delete(delete: Delete) {
@@ -309,6 +337,25 @@ pub fn delete(delete: Delete) {
 
     // TODO: check state if ready for deletion
     let state = ContainerState::try_from(state_path.as_path()).unwrap();
+
+    let bundle = &state.bundle;
+    let spec = match Spec::try_from(Path::new(&bundle).join("config.json").as_path()) {
+        Ok(spec) => spec,
+        Err(err) => {
+            error!("{}", err);
+            exit(1);
+        }
+    };
+
+    if let Some(hooks) = &spec.hooks {
+        if let Some(poststop) = &hooks.poststop {
+            for hook in poststop {
+                exec_hook(hook, &state).expect("error executing poststop hook");
+            }
+        }
+    }
+
+    // TODO: actually delete the container
     std::fs::remove_dir_all(Path::new(&delete.root).join(&delete.id)).unwrap();
 }
 
@@ -405,11 +452,19 @@ pub fn main() {
                 ),
         )
         .subcommand(
-            SubCommand::with_name("start").arg(
-                Arg::with_name("id")
-                    .required(true)
-                    .help("ID of the container")
-                    .help("starts the container process"),
+            SubCommand::with_name("start")
+                .arg(
+                    Arg::with_name("id")
+                        .required(true)
+                        .help("ID of the container")
+                        .help("starts the container process"))
+                .arg(
+                    Arg::with_name("bundle")
+                        .long("bundle")
+                        .short("b")
+                        .takes_value(true)
+                        .required(true)
+                        .help("bundle directory containing container configuration"),
             ),
         )
         .subcommand(
