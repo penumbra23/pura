@@ -235,9 +235,12 @@ pub fn mount_devices(mounts: &Vec<Mount>, rootfs: &Path) -> Result<()> {
 
         let dest = rootfs.join(m.destination.trim_start_matches("/"));
 
-        if m.mount_type.as_ref().unwrap() != "bind" {
-            std::fs::create_dir_all(&dest).unwrap();
-        } else {
+        if !std::path::Path::new(&dest).exists() {
+            std::fs::create_dir_all(&dest)
+                .map_err(|err| Error { msg: format!("{}", err), err_type: ErrorType::Container })?;
+        }
+
+        if m.mount_type.as_ref().unwrap() == "bind" {
             flags |= MsFlags::MS_BIND;
         }
 
