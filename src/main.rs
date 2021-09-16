@@ -21,7 +21,7 @@ use crate::core::{
 };
 
 use clap::{App, Arg, SubCommand};
-use log::{Level, error, info};
+use log::{Level, error, info, warn};
 use nix::sys::signal::Signal;
 use nix::unistd::{Gid, Pid, Uid, chdir, execvp, setgid, sethostname, setuid};
 use oci::{
@@ -161,12 +161,22 @@ pub fn create(create: Create) {
             }
         }
 
+        // Wait for the hook to finish and the parent to confirm
+        ipc_channel.send("before_pivot").unwrap();
+        if let Ok(msg) = ipc_channel.recv() {
+            if !msg.eq("ok") {
+                exit_msg(1, format!("error:hook:createRuntime:{}", msg));
+            }
+        }
+
         if let Err(err) = pivot_rootfs(&rootfs) {
             ipc_channel
                 .send(&format!("error:pivot_root:{}", err))
                 .unwrap();
             exit_msg(1, format!("error:pivot_root:{}", err));
         }
+
+        ipc_channel.send("after_pivot").unwrap();
 
         if let Some(hostname) = &spec.hostname {
             sethostname(hostname).unwrap();
@@ -200,9 +210,10 @@ pub fn create(create: Create) {
                 }
             }
 
+            // Finish the create command
             ipc_channel.send("ready").unwrap();
 
-            // Wait for the start command
+            // Wait for the start command to fire start
             ipc_channel.accept().unwrap();
             match ipc_channel.recv() {
                 Ok(msg) => {
@@ -259,8 +270,21 @@ pub fn create(create: Create) {
             Ok(msg) => {
                 if msg.starts_with("error") {
                     error!("{}", msg);
+                    exit(1);
                 } else if msg.eq("ready") {
                     break;
+                } else if msg.eq("before_pivot") {
+                    if let Some(hooks) = &spec.hooks {
+                        if let Some(create_runtime) = &hooks.create_runtime {
+                            for cr_hook in create_runtime {
+                                if exec_hook(cr_hook, &state).is_err() {
+                                    error!("createRuntime hook failed");
+                                    signal(pid, 9).unwrap();
+                                }
+                            }
+                        }
+                    }
+                    ipc_channel.send("ok").unwrap();
                 }
             },
             Err(err) => {
@@ -285,18 +309,6 @@ pub fn create(create: Create) {
     state.status = Status::Created;
     state.pid = i32::from(pid) as u64;
     state.save(container_path).unwrap();
-
-    // TODO: move to start op
-    if let Some(hooks) = &spec.hooks {
-        if let Some(create_runtime) = &hooks.create_runtime {
-            for cr_hook in create_runtime {
-                if exec_hook(cr_hook, &state).is_err() {
-                    error!("createRuntime hook failed");
-                    signal(pid, 9).unwrap();
-                }
-            }
-        }
-    }
 
     // Parent cleanup
     if has_terminal {
@@ -355,7 +367,9 @@ pub fn start(start: Start) {
     if let Some(hooks) = &spec.hooks {
         if let Some(poststart) = &hooks.poststart {
             for hook in poststart {
-                exec_hook(hook, &state).expect("error executing poststart hook");
+                if let Err(err) = exec_hook(hook, &state) {
+                    warn!("poststart hook error: {}", err);
+                }
             }
         }
     }
