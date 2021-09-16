@@ -72,3 +72,14 @@ To avoid halting the Docker daemon everytime you test, you can add it inside the
   ...
 }
 ```
+## Contribute
+
+As this is a experimental project intended for learing purposes, anyone can submit PRs or file issues. Features left to implement are:
+
+- cgroups
+- seccomp
+- apparmor
+
+
+## License
+MIT
