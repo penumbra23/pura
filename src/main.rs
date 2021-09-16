@@ -1,6 +1,7 @@
 mod core;
 mod oci;
 
+use std::convert::TryInto;
 use std::{convert::TryFrom, ffi::CString, io::Write, path::Path};
 
 use crate::core::logger::ContainerLogger;
@@ -150,14 +151,11 @@ pub fn create(create: Create) {
         if let Some(hooks) = &spec.hooks {
             if let Some(create) = &hooks.create_container {
                 for create_hook in create {
-                    match exec_hook(create_hook, &state) {
-                        Ok(_) => todo!(),
-                        Err(err) => {
-                            init_lock_child
-                                .notify(&format!("error createContainer hook {}", err))
-                                .unwrap();
-                            exit_msg(1, format!("error createContainer hook {}", err));
-                        }
+                    if exec_hook(create_hook, &state).is_err() {
+                        init_lock_child
+                            .notify(&format!("createContainer hook failed"))
+                            .unwrap();
+                        exit_msg(1, format!("createContainer hook failed"));
                     }
                 }
             }
@@ -234,9 +232,7 @@ pub fn create(create: Create) {
     // Wait until child prepares for command execution
     match init_lock.wait() {
         Ok(str) => {
-            if str.eq("0") {
-                info!("child process prepared successfully");
-            } else {
+            if !str.eq("0") {
                 error!("child process error {}", str);
                 exit(2);
             }
@@ -259,17 +255,12 @@ pub fn create(create: Create) {
 
     // TODO: move to start op
     if let Some(hooks) = &spec.hooks {
-        if let Some(prestart) = &hooks.prestart {
-            for pre_hook in prestart {
-                exec_hook(pre_hook, &state).expect("prestart hook failed");
-                signal(pid, 9).unwrap();
-            }
-        }
-
         if let Some(create_runtime) = &hooks.create_runtime {
             for cr_hook in create_runtime {
-                exec_hook(cr_hook, &state).expect("create_runtime hook failed");
-                signal(pid, 9).unwrap();
+                if exec_hook(cr_hook, &state).is_err() {
+                    error!("createRuntime hook failed");
+                    signal(pid, 9).unwrap();
+                }
             }
         }
     }
@@ -298,12 +289,24 @@ pub fn start(start: Start) {
     };
 
     // TODO: check state
-    // TODO: by the runtime spec the prestart hook needs to be executed here ?
-
+    let pid = Pid::from_raw(state.pid.try_into().unwrap());
+    
     if let Some(hooks) = &spec.hooks {
+        if let Some(prestart) = &hooks.prestart {
+            for pre_hook in prestart {
+                if exec_hook(pre_hook, &state).is_err() {
+                    error!("prestart hook failed");
+                    signal(pid, 9).unwrap();
+                }
+            }
+        }
+
         if let Some(start_container) = &hooks.start_container {
             for hook in start_container {
-                exec_hook(hook, &state).expect("error executing startContainer hook");
+                if exec_hook(hook, &state).is_err() {
+                    error!("startContainer hook failed");
+                    signal(pid, 9).unwrap();
+                }
             }
         }
     }
@@ -458,14 +461,6 @@ pub fn main() {
                         .required(true)
                         .help("ID of the container")
                         .help("starts the container process"))
-                .arg(
-                    Arg::with_name("bundle")
-                        .long("bundle")
-                        .short("b")
-                        .takes_value(true)
-                        .required(true)
-                        .help("bundle directory containing container configuration"),
-            ),
         )
         .subcommand(
             SubCommand::with_name("kill")
