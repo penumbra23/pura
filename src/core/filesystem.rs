@@ -235,9 +235,12 @@ pub fn mount_devices(mounts: &Vec<Mount>, rootfs: &Path) -> Result<()> {
 
         let dest = rootfs.join(m.destination.trim_start_matches("/"));
 
-        if m.mount_type.as_ref().unwrap() != "bind" {
-            std::fs::create_dir_all(&dest).unwrap();
-        } else {
+        if !std::path::Path::new(&dest).exists() {
+            std::fs::create_dir_all(&dest)
+                .map_err(|err| Error { msg: format!("{}", err), err_type: ErrorType::Container })?;
+        }
+
+        if m.mount_type.as_ref().unwrap() == "bind" {
             flags |= MsFlags::MS_BIND;
         }
 
@@ -249,12 +252,12 @@ pub fn mount_devices(mounts: &Vec<Mount>, rootfs: &Path) -> Result<()> {
             None::<&str>,
         ) {
             Ok(_) => (),
-            Err(e) => {
+            Err(err) => {
                 // Skip if the device is busy
                 // This happens with the cgroup mount
-                if e.as_errno() != Some(Errno::EBUSY) {
+                if err.as_errno() != Some(Errno::EBUSY) {
                     return Err(Error {
-                        msg: "mount device failed".to_string(),
+                        msg: format!("mount device failed {}", err),
                         err_type: ErrorType::Runtime,
                     });
                 }
