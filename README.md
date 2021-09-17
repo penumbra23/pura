@@ -10,11 +10,26 @@
 
 **Pura** works and it's only feature tested, but no official security audit has been done, so please use this code exclusively to learn and expand the codebase. If you want a production-grade container runtime that's written in Rust, use the excellent [Youki](https://github.com/containers/youki) runtime.
 
+## Intro
+
+The goal of **Pura** was to learn how container runtimes work and how container engines integrate an OCI-compliant implementation. The only requirement was to be as dependency free as possible with a small memory footprint. Binaries built for release mode are all **<5MB**.
+
+**Pura** was tested on the following distros (standalone binary and Docker integration):
+
+- Debian 11
+- Fedora 29
+- CentOS 7
+- Ubuntu 18.04 & 20.04
+- OpenSUSE 15 
+
 ## Build
 
 Prerequisites:
-- Rust 1.52 or later
-- libc - `apt-get install build-essential`
+- Rust 1.54 or later
+- libc:
+   - Debian: `apt-get install build-essential`
+   - Fedora: `dnf install gcc`
+   - CentOS: `yum install gcc`
 
 Build as a usual Rust project:
 ```
