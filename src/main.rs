@@ -2,6 +2,7 @@ mod core;
 mod oci;
 
 use std::convert::TryInto;
+use std::os::unix::prelude::AsRawFd;
 use std::{convert::TryFrom, ffi::CString, io::Write, path::Path};
 
 use crate::core::ipc::IpcChannel;
@@ -21,8 +22,11 @@ use crate::core::{
 };
 
 use clap::{App, Arg, SubCommand};
-use log::{Level, error, info, warn};
+use log::{Level, error, warn};
+use nix::fcntl::{OFlag, open};
+use nix::sched::{CloneFlags, setns};
 use nix::sys::signal::Signal;
+use nix::sys::stat::Mode;
 use nix::unistd::{Gid, Pid, Uid, chdir, execvp, setgid, sethostname, setuid};
 use oci::{
     ops::{Create, Delete, Kill, Start, State},
@@ -91,6 +95,32 @@ pub fn create(create: Create) {
 
         init_lock_child.notify(&"ok".to_string()).unwrap();
         init_lock_child.close().unwrap();
+
+        // Bind to namespaces paths
+        if let Some(linux) = &spec.linux {
+            if let Some(namespaces) = &linux.namespaces {
+                for ns in namespaces {
+                    if let Some(path) = &ns.path {
+                        let fd = match open(path.as_str(), OFlag::empty(), Mode::empty()) {
+                            Ok(fd) => fd,
+                            Err(err) => {
+                                ipc_channel
+                                    .send(&format!("error:ns:{}", err))
+                                    .unwrap();
+                                exit_msg(1, format!("error:ns:{}", err));
+                            }
+                        };
+
+                        if let Err(err) = setns(fd.as_raw_fd(), CloneFlags::empty()) {
+                            ipc_channel
+                                .send(&format!("error:ns:{}", err))
+                                .unwrap();
+                            exit_msg(1, format!("error:ns:{}", err));
+                        }
+                    }
+                }
+            }
+        }
 
         // Accept the create process
         ipc_channel.accept().unwrap();
