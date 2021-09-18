@@ -108,7 +108,7 @@ mod tests {
         let mut log_file = std::fs::OpenOptions::new()
             .read(true)
             .create(false)
-            .open("log.txt")
+            .open(path)
             .unwrap();
         let mut logs = String::new();
         log_file.read_to_string(&mut logs).unwrap();
