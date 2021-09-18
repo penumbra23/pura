@@ -1,4 +1,4 @@
-use std::{fmt::Display, io::{Write, stdout}, os::unix::prelude::OsStrExt};
+use std::{fmt::Display, io::{Write, stdout}};
 
 #[derive(Debug, Clone)]
 pub enum ErrorType {

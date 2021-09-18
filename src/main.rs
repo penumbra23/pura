@@ -127,7 +127,7 @@ pub fn create(create: Create) {
 
         let rootfs = Path::new(&spec.root.path);
 
-        let pty: Option<Pty> = if has_terminal {
+        let _: Option<Pty> = if has_terminal {
             match Pty::new() {
                 Ok(pty) => {
                     pty.connect().unwrap();
