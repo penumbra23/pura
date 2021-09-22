@@ -441,18 +441,6 @@ pub fn delete(delete: Delete) {
     }
 }
 
-fn to_signal(sig: i32) -> Signal {
-    match sig {
-        1 => Signal::SIGHUP,
-        2 => Signal::SIGINT,
-        6 => Signal::SIGABRT,
-        9 => Signal::SIGKILL,
-        15 => Signal::SIGTERM,
-        17 => Signal::SIGCHLD,
-        _ => panic!("unknown signal"),
-    }
-}
-
 pub fn kill(kill: Kill) {
     let state_path = Path::new(&kill.root).join(&kill.id);
     let state = ContainerState::try_from(state_path.as_path()).unwrap();
