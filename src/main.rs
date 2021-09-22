@@ -428,8 +428,17 @@ pub fn delete(delete: Delete) {
         }
     }
 
-    // TODO: actually delete the container
-    std::fs::remove_dir_all(Path::new(&delete.root).join(&delete.id)).unwrap();
+    if std::fs::remove_dir_all(Path::new(&delete.root).join(&delete.id)).is_err() {
+        warn!("failed to delete container root");
+    }
+
+    match signal(Pid::from_raw(state.pid as i32), 9) {
+        Ok(_) => return,
+        Err(err) => {
+            error!("error deleting container: {}", err);
+            exit(1);
+        }
+    }
 }
 
 fn to_signal(sig: i32) -> Signal {
@@ -452,9 +461,9 @@ pub fn kill(kill: Kill) {
         exit(1);
     }
 
-    match nix::sys::signal::kill(
+    match signal(
         Pid::from_raw(state.pid as i32),
-        to_signal(kill.signal),
+        kill.signal,
     ) {
         Ok(_) => return,
         Err(_) => exit(1),
