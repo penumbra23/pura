@@ -23,10 +23,11 @@ use crate::core::{
 
 use clap::{App, Arg, SubCommand};
 use log::{Level, error, warn};
+use nix::errno::Errno;
 use nix::fcntl::{OFlag, open};
 use nix::sched::{CloneFlags, setns};
-use nix::sys::signal::Signal;
 use nix::sys::stat::Mode;
+use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::{Gid, Pid, Uid, chdir, execvp, setgid, sethostname, setuid};
 use oci::{
     ops::{Create, Delete, Kill, Start, State},
@@ -409,7 +410,13 @@ pub fn delete(delete: Delete) {
     let state_path = Path::new(&delete.root).join(&delete.id);
 
     // TODO: check state if ready for deletion
-    let state = ContainerState::try_from(state_path.as_path()).unwrap();
+    let state = match ContainerState::try_from(state_path.as_path()) {
+        Ok(state) => state,
+        Err(err) => {
+            error!("error reading state {}", err);
+            exit(1);
+        }
+    };
 
     let bundle = &state.bundle;
     let spec = match Spec::try_from(Path::new(&bundle).join("config.json").as_path()) {
@@ -431,30 +438,41 @@ pub fn delete(delete: Delete) {
     if std::fs::remove_dir_all(Path::new(&delete.root).join(&delete.id)).is_err() {
         warn!("failed to delete container root");
     }
-
-    match signal(Pid::from_raw(state.pid as i32), 9) {
-        Ok(_) => return,
-        Err(err) => {
-            error!("error deleting container: {}", err);
-            exit(1);
-        }
-    }
 }
 
 pub fn kill(kill: Kill) {
     let state_path = Path::new(&kill.root).join(&kill.id);
-    let state = ContainerState::try_from(state_path.as_path()).unwrap();
+    let mut state = ContainerState::try_from(state_path.as_path()).unwrap();
 
     if state.status != Status::Created && state.status != Status::Running {
+        error!("error can't kill container that isn't created or running: {:?}", &state);
         exit(1);
     }
 
-    match signal(
+    if let Err(err) = signal(
         Pid::from_raw(state.pid as i32),
         kill.signal,
     ) {
-        Ok(_) => return,
-        Err(_) => exit(1),
+        error!("error killing container: {}", err);
+        exit(1);
+    }
+
+    match waitpid(Pid::from_raw(state.pid as i32), Some(WaitPidFlag::WNOHANG)) {
+        Ok(res) => {
+            match res {
+                WaitStatus::Exited(_, _) | WaitStatus::Signaled(_, _, _) => {
+                    state.status = Status::Stopped;
+                    state.save(state_path.as_path()).unwrap();
+                },
+                _ => (),
+            }
+        }
+        Err(err) => {
+            if err.as_errno() != Some(Errno::ECHILD) {
+                error!("error polling pid status: {}", err);
+                exit(1);
+            }
+        }
     }
 }
 
