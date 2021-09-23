@@ -12,6 +12,7 @@ use nix::{
             SockType, UnixAddr,
         },
         stat::Mode,
+        uio::IoVec,
     },
     unistd::{close, dup2, setsid},
 };
@@ -53,10 +54,16 @@ impl Pty {
     }
 
     pub fn connect(&self) -> Result<()> {
-        setsid().map_err(|_| Error { msg: "failed to set session".to_string(), err_type: ErrorType::Container })?;
+        setsid().map_err(|_| Error {
+            msg: "failed to set session".to_string(),
+            err_type: ErrorType::Container,
+        })?;
 
-        let slave_fd = open(Path::new(&self.slave_name), OFlag::O_RDWR, Mode::empty())
-            .map_err(|_| Error { msg: "failed to open slave pty".to_string(), err_type: ErrorType::Container })?;
+        let slave_fd =
+            open(Path::new(&self.slave_name), OFlag::O_RDWR, Mode::empty()).map_err(|_| Error {
+                msg: "failed to open slave pty".to_string(),
+                err_type: ErrorType::Container,
+            })?;
 
         dup2(slave_fd.as_raw_fd(), 0).map_err(|_| Error {
             msg: "error dup2 stdin".to_string(),
@@ -101,7 +108,7 @@ impl PtySocket {
             err_type: ErrorType::Runtime,
         })?;
 
-        Ok(PtySocket{
+        Ok(PtySocket {
             socket_fd: socket_fd.as_raw_fd(),
         })
     }
@@ -117,15 +124,12 @@ impl PtySocket {
 
     pub fn send_pty(&self, pty: &Pty) -> Result<()> {
         let master_fds = [pty.master.as_raw_fd()];
+        let master_fd_msg = pty.master.as_raw_fd().to_ne_bytes();
 
-        sendmsg(
-            self.socket_fd,
-            &[nix::sys::uio::IoVec::from_slice("/dev/ptmx".as_bytes())],
-            &[ControlMessage::ScmRights(&master_fds)],
-            MsgFlags::empty(),
-            None,
-        )
-        .map_err(|_| Error {
+        let iov = [IoVec::from_slice(&master_fd_msg)];
+        let cmsg = [ControlMessage::ScmRights(&master_fds)];
+
+        sendmsg(self.socket_fd, &iov, &cmsg, MsgFlags::empty(), None).map_err(|_| Error {
             msg: "failed sending pty fd to socket".to_string(),
             err_type: ErrorType::Container,
         })?;
