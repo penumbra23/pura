@@ -20,6 +20,7 @@ use crate::core::{
     state::Status,
     terminal::{Pty, PtySocket},
 };
+use crate::oci::spec::Namespace;
 
 use clap::{App, Arg, SubCommand};
 use log::{Level, error, warn};
@@ -81,6 +82,11 @@ pub fn create(create: Create) {
     let init_lock = IpcParent::new(&init_lock_path).unwrap();
 
     let sock_path = format!("{}/container.sock", container_path.display());
+
+    let namespaces: Vec<Namespace> = match &spec.linux {
+        Some(linux) => linux.namespaces.clone().unwrap_or(Vec::new()),
+        None => Vec::new(),
+    };
 
     let pid = clone_child(|| {
         let init_lock_child = IpcChild::new(&init_lock_path).unwrap();
@@ -276,7 +282,7 @@ pub fn create(create: Create) {
         }
 
         0
-    })
+    }, &namespaces)
     .expect("error forking child");
 
     // Wait until child sets up IPC channel

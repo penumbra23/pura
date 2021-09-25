@@ -4,18 +4,34 @@ use nix::{
     unistd::Pid,
 };
 
-use crate::core::common::{Error, ErrorType, Result};
+use crate::{core::common::{Error, ErrorType, Result}, oci::spec::Namespace};
 
-pub fn clone_child(child_fun: impl FnMut() -> isize) -> Result<nix::unistd::Pid> {
+fn to_flags(namespace: &Namespace) -> CloneFlags {
+    match namespace.namespace.as_str() {
+        "pid" => CloneFlags::CLONE_NEWPID,
+        "network" | "net" => CloneFlags::CLONE_NEWNET,
+        "mount" | "mnt" => CloneFlags::CLONE_NEWNS,
+        "ipc" => CloneFlags::CLONE_NEWIPC,
+        "uts" => CloneFlags::CLONE_NEWUTS,
+        "user" => CloneFlags::CLONE_NEWUSER,
+        "cgroup" => CloneFlags::CLONE_NEWCGROUP,
+        _ => panic!("unknown namespace {}", namespace.namespace),
+    }
+}
+
+pub fn clone_child(child_fun: impl FnMut() -> isize, namespaces: &Vec<Namespace>) -> Result<nix::unistd::Pid> {
     const STACK_SIZE: usize = 4 * 1024 * 1024; // 4 MB
     let ref mut stack: [u8; STACK_SIZE] = [0; STACK_SIZE];
 
     // TODO: use linux.namespaces for the exact one to unshare
-    let clone_flags = CloneFlags::CLONE_NEWIPC
-        | CloneFlags::CLONE_NEWNET
-        | CloneFlags::CLONE_NEWNS
-        | CloneFlags::CLONE_NEWPID
-        | CloneFlags::CLONE_NEWUTS;
+    let spec_namespaces = namespaces.into_iter()
+        .map(|ns| to_flags(ns))
+        .reduce(|a, b| a | b);
+
+    let clone_flags = match spec_namespaces {
+        Some(flags) => flags,
+        None => CloneFlags::empty(),
+    };
 
     let child = clone(Box::new(child_fun), stack, clone_flags, None);
 
