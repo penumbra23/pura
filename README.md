@@ -20,7 +20,7 @@ The goal of **Pura** was to learn how container runtimes work and how container 
 - Fedora 29
 - CentOS 7
 - Ubuntu 18.04 & 20.04
-- OpenSUSE 15 
+- OpenSUSE 15
 
 ## Build
 
@@ -41,7 +41,7 @@ cargo build --release
 ## Usage
 
 **Pura** can be used as a standalone container runtime like **runc** with the OCI compliant commands:
-TODO: explain export bundle
+
 ```
 cd target/release
 ./pura create id123456789 --bundle /path/to/bundle
@@ -54,7 +54,7 @@ or it can be integrated with Docker:
 ```bash
 # stop the dockerd service (NOTE: this will stop all running containers on your Linux OS)
 # init-based
-sudo service stop
+sudo service docker stop
 # systemd-based
 sudo systemctl stop docker
 
@@ -87,6 +87,9 @@ To avoid halting the Docker daemon everytime you test, you can add it inside the
   ...
 }
 ```
+
+After adding the runtime section inside `daemon.json` just start the Docker service and specify the `--runtime pura` option when starting a container. This way, when changing the source code just recompile it without restarting the Docker service.
+
 ## Contribute
 
 As this is a experimental project intended for learing purposes, anyone can submit PRs or file issues. Features left to implement are:
