@@ -370,8 +370,13 @@ pub fn start(start: Start) {
         }
     };
 
-    // TODO: check state
     let pid = Pid::from_raw(state.pid.try_into().unwrap());
+
+    if state.status != Status::Created {
+        error!("container isn't created");
+        signal(pid, 9).unwrap();
+        exit(1);
+    }
 
     if let Some(hooks) = &spec.hooks {
         if let Some(prestart) = &hooks.prestart {
@@ -379,6 +384,7 @@ pub fn start(start: Start) {
                 if exec_hook(pre_hook, &state).is_err() {
                     error!("prestart hook failed");
                     signal(pid, 9).unwrap();
+                    exit(1);
                 }
             }
         }
@@ -388,6 +394,7 @@ pub fn start(start: Start) {
                 if exec_hook(hook, &state).is_err() {
                     error!("startContainer hook failed");
                     signal(pid, 9).unwrap();
+                    exit(1);
                 }
             }
         }
@@ -415,7 +422,6 @@ pub fn start(start: Start) {
 pub fn delete(delete: Delete) {
     let state_path = Path::new(&delete.root).join(&delete.id);
 
-    // TODO: check state if ready for deletion
     let state = match ContainerState::try_from(state_path.as_path()) {
         Ok(state) => state,
         Err(err) => {
@@ -432,6 +438,11 @@ pub fn delete(delete: Delete) {
             exit(1);
         }
     };
+
+    // Just log the error
+    if state.status != Status::Stopped {
+        error!("[DELETE] container isn't created");
+    }
 
     if let Some(hooks) = &spec.hooks {
         if let Some(poststop) = &hooks.poststop {
@@ -451,8 +462,7 @@ pub fn kill(kill: Kill) {
     let mut state = ContainerState::try_from(state_path.as_path()).unwrap();
 
     if state.status != Status::Created && state.status != Status::Running {
-        error!("error can't kill container that isn't created or running: {:?}", &state);
-        exit(1);
+        error!("[KILL] error can't kill container that isn't created or running: {:?}", &state);
     }
 
     if let Err(err) = signal(

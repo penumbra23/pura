@@ -23,7 +23,6 @@ pub fn clone_child(child_fun: impl FnMut() -> isize, namespaces: &Vec<Namespace>
     const STACK_SIZE: usize = 4 * 1024 * 1024; // 4 MB
     let ref mut stack: [u8; STACK_SIZE] = [0; STACK_SIZE];
 
-    // TODO: use linux.namespaces for the exact one to unshare
     let spec_namespaces = namespaces.into_iter()
         .map(|ns| to_flags(ns))
         .reduce(|a, b| a | b);
