@@ -235,6 +235,7 @@ impl IpcChannel {
         }
     }
 
+    #[allow(dead_code)]
     pub fn send_recv(&self, msg: &str) -> Result<String> {
         self.send(msg)?;
         Ok(self.recv()?)

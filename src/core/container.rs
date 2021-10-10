@@ -24,9 +24,22 @@ use super::{
     terminal::{Pty, PtySocket},
 };
 
-/*
-
-*/
+/// Fork a child container process and initializes the container.
+/// Waits for the start command to trigger the user-defined process
+///
+/// # Arguments
+///
+/// * `spec` - OCI specification instance
+/// * `state` - Loaded state of the container
+/// * `namespaces` - Vector of namespaces passed to `clone`
+/// * `init_lock_path` - String path to the initial lock Unix domain socket (used to inform the parent when the child finishes container preparation)
+/// * `sock_path` - Container's main Unix domain socket (used for the start command)
+/// * `pty_socket` - Optional: if the user specified a terminal
+///
+/// # Returns
+///
+/// Pid of the running container process inside the root PID namespace
+/// 
 pub fn fork_container(
     spec: &Spec,
     state: &State,
