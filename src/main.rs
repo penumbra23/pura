@@ -2,34 +2,28 @@ mod core;
 mod oci;
 
 use std::convert::TryInto;
-use std::os::unix::prelude::AsRawFd;
-use std::{convert::TryFrom, ffi::CString, io::Write, path::Path};
+use std::{convert::TryFrom, io::Write, path::Path};
 
+use crate::core::container::fork_container;
+use crate::core::hooks::exec_hook;
 use crate::core::ipc::IpcChannel;
 use crate::core::logger::ContainerLogger;
 use crate::core::state::State as ContainerState;
 
 use crate::core::{
     common::{exit, exit_msg},
-    filesystem::{
-        create_default_devices, create_devices, mount_devices, mount_rootfs, symlinks_defaults, pivot_rootfs
-    },
-    fork::{clone_child, signal},
-    hooks::exec_hook,
-    ipc::{IpcChild, IpcParent},
+    fork::signal,
+    ipc::IpcParent,
     state::Status,
-    terminal::{Pty, PtySocket},
+    terminal::PtySocket,
 };
 use crate::oci::spec::Namespace;
 
 use clap::{App, Arg, SubCommand};
-use log::{Level, error, warn};
+use log::{error, warn, Level};
 use nix::errno::Errno;
-use nix::fcntl::{OFlag, open};
-use nix::sched::{CloneFlags, setns};
-use nix::sys::stat::Mode;
-use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
-use nix::unistd::{Gid, Pid, Uid, chdir, execvp, setgid, sethostname, setuid};
+use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
+use nix::unistd::Pid;
 use oci::{
     ops::{Create, Delete, Kill, Start, State},
     spec::Spec,
@@ -66,7 +60,7 @@ pub fn create(create: Create) {
     let container_path = Path::new(&container_path_str);
     state.save(container_path).unwrap();
 
-    let pty_console = if has_terminal {
+    let pty_socket = if has_terminal {
         match PtySocket::new(&console_socket.expect("no console-socket arg")) {
             Ok(socket_fd) => Some(socket_fd),
             Err(err) => {
@@ -88,202 +82,15 @@ pub fn create(create: Create) {
         None => Vec::new(),
     };
 
-    let pid = clone_child(|| {
-        let init_lock_child = IpcChild::new(&init_lock_path).unwrap();
-
-        let mut ipc_channel = match IpcChannel::new(&sock_path) {
-            Ok(ch) => ch,
-            Err(err) => {
-                init_lock_child.notify(&format!("error:ipc:{}", err)).unwrap();
-                init_lock_child.close().unwrap();
-                exit_msg(1, format!("error:ipc:{}", err));
-            }
-        };
-
-        init_lock_child.notify(&"ok".to_string()).unwrap();
-        init_lock_child.close().unwrap();
-
-        // Bind to namespaces paths
-        if let Some(linux) = &spec.linux {
-            if let Some(namespaces) = &linux.namespaces {
-                for ns in namespaces {
-                    if let Some(path) = &ns.path {
-                        let fd = match open(path.as_str(), OFlag::empty(), Mode::empty()) {
-                            Ok(fd) => fd,
-                            Err(err) => {
-                                ipc_channel
-                                    .send(&format!("error:ns:{}", err))
-                                    .unwrap();
-                                exit_msg(1, format!("error:ns:{}", err));
-                            }
-                        };
-
-                        if let Err(err) = setns(fd.as_raw_fd(), CloneFlags::empty()) {
-                            ipc_channel
-                                .send(&format!("error:ns:{}", err))
-                                .unwrap();
-                            exit_msg(1, format!("error:ns:{}", err));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Accept the create process
-        ipc_channel.accept().unwrap();
-
-        let rootfs = Path::new(&spec.root.path);
-
-        let _: Option<Pty> = if has_terminal {
-            match Pty::new() {
-                Ok(pty) => {
-                    pty.connect().unwrap();
-                    pty_console.as_ref().unwrap().send_pty(&pty).unwrap();
-                    Some(pty)
-                }
-                Err(err) => {
-                    ipc_channel
-                        .send(&format!("error:terminal:{}", err))
-                        .unwrap();
-                    exit_msg(1, format!("error:terminal:{}", err));
-                }
-            }
-        } else {
-            None
-        };
-
-        // Mounts the rootfs folder with bind option
-        if let Err(err) = mount_rootfs(&rootfs) {
-            ipc_channel
-                .send(&format!("error:rootfs:{}", err))
-                .unwrap();
-            exit_msg(1, format!("error:rootfs:{}", err));
-        }
-
-        if let Some(mounts) = &spec.mounts {
-            if let Err(err) = mount_devices(&mounts, rootfs) {
-                ipc_channel
-                    .send(&format!("error:devices:{}", err))
-                    .unwrap();
-                exit_msg(1, format!("error:devices:{}", err));
-            }
-        }
-
-        if let Some(linux) = &spec.linux {
-            if let Some(devices) = &linux.devices {
-                if let Err(err) = create_devices(&devices, rootfs) {
-                    ipc_channel
-                        .send(&format!("error:devices:{}", err))
-                        .unwrap();
-                    exit_msg(1, format!("error:devices:{}", err));
-                }
-            }
-        }
-        // Create default devices and mounts
-        create_default_devices(&rootfs);
-
-        // Symlinks the file descriptors of the process
-        symlinks_defaults(&rootfs);
-
-        if let Some(hooks) = &spec.hooks {
-            if let Some(create) = &hooks.create_container {
-                for create_hook in create {
-                    if let Err(err) = exec_hook(create_hook, &state) {
-                        ipc_channel
-                            .send(&format!("error:hook:createContainer:{}", err))
-                            .unwrap();
-                        exit_msg(1, format!("error:hook:createContainer:{}", err));
-                    }
-                }
-            }
-        }
-
-        // Wait for the hook to finish and the parent to confirm
-        ipc_channel.send("before_pivot").unwrap();
-        if let Ok(msg) = ipc_channel.recv() {
-            if !msg.eq("ok") {
-                exit_msg(1, format!("error:hook:createRuntime:{}", msg));
-            }
-        }
-
-        if let Err(err) = pivot_rootfs(&rootfs) {
-            ipc_channel
-                .send(&format!("error:pivot_root:{}", err))
-                .unwrap();
-            exit_msg(1, format!("error:pivot_root:{}", err));
-        }
-
-        ipc_channel.send("after_pivot").unwrap();
-
-        if let Some(hostname) = &spec.hostname {
-            sethostname(hostname).unwrap();
-        }
-
-        // Here gets the process executed
-        if let Some(process) = &spec.process {
-            let cmd = &process.args.as_ref().unwrap()[0];
-            let args: Vec<CString> = spec
-                .process
-                .as_ref()
-                .unwrap()
-                .args
-                .as_ref()
-                .unwrap()
-                .iter()
-                .map(|a| CString::new(a.to_string()).unwrap_or_default())
-                .collect();
-
-            let exec = CString::new(cmd.as_bytes()).unwrap();
-
-            if let Some(envs) = &process.env {
-                for (key, _) in std::env::vars() {
-                    std::env::remove_var(key);
-                }
-
-                for env in envs {
-                    if let Some((key, value)) = env.split_once("=") {
-                        std::env::set_var(key, value);
-                    }
-                }
-            }
-
-            // Finish the create command
-            ipc_channel.send("ready").unwrap();
-
-            // Wait for the start command to fire start
-            ipc_channel.accept().unwrap();
-            match ipc_channel.recv() {
-                Ok(msg) => {
-                    if !msg.eq("start") {
-                        println!("[ERROR]: {}", msg);
-                        exit(1);
-                    }
-                },
-                Err(err) => {
-                    println!("[ERROR]: {}", err);
-                    exit(1);
-                }
-            }
-
-            if let Some(user) = &process.user {
-                setuid(Uid::from_raw(user.uid as u32)).unwrap();
-                setgid(Gid::from_raw(user.gid as u32)).unwrap();
-            }
-
-            chdir(Path::new(&process.cwd)).unwrap();
-            match execvp(&exec, &args) {
-                Ok(_) => (),
-                Err(err) => {
-                    // We can't log this error because it doesn't see the log file
-                    println!("[ERROR]: {}", err.to_string());
-                    exit(1);
-                }
-            }
-        }
-
-        0
-    }, &namespaces)
-    .expect("error forking child");
+    let pid = fork_container(
+        &spec,
+        &state,
+        &namespaces,
+        &init_lock_path,
+        &sock_path,
+        &pty_socket,
+    )
+    .expect("error forking container");
 
     // Wait until child sets up IPC channel
     match init_lock.wait() {
@@ -323,11 +130,11 @@ pub fn create(create: Create) {
                     }
                     ipc_channel.send("ok").unwrap();
                 }
-            },
+            }
             Err(err) => {
                 error!("{}", err);
                 signal(pid, 9).unwrap();
-            },
+            }
         }
     }
 
@@ -349,7 +156,7 @@ pub fn create(create: Create) {
 
     // Parent cleanup
     if has_terminal {
-        match pty_console.unwrap().close() {
+        match pty_socket.unwrap().close() {
             Ok(_) => (),
             Err(err) => error!("error closing console-socket: {}", err),
         }
@@ -462,27 +269,25 @@ pub fn kill(kill: Kill) {
     let mut state = ContainerState::try_from(state_path.as_path()).unwrap();
 
     if state.status != Status::Created && state.status != Status::Running {
-        error!("[KILL] error can't kill container that isn't created or running: {:?}", &state);
+        error!(
+            "[KILL] error can't kill container that isn't created or running: {:?}",
+            &state
+        );
     }
 
-    if let Err(err) = signal(
-        Pid::from_raw(state.pid as i32),
-        kill.signal,
-    ) {
+    if let Err(err) = signal(Pid::from_raw(state.pid as i32), kill.signal) {
         error!("error killing container: {}", err);
         exit(1);
     }
 
     match waitpid(Pid::from_raw(state.pid as i32), Some(WaitPidFlag::WNOHANG)) {
-        Ok(res) => {
-            match res {
-                WaitStatus::Exited(_, _) | WaitStatus::Signaled(_, _, _) => {
-                    state.status = Status::Stopped;
-                    state.save(state_path.as_path()).unwrap();
-                },
-                _ => (),
+        Ok(res) => match res {
+            WaitStatus::Exited(_, _) | WaitStatus::Signaled(_, _, _) => {
+                state.status = Status::Stopped;
+                state.save(state_path.as_path()).unwrap();
             }
-        }
+            _ => (),
+        },
         Err(err) => {
             if err.as_errno() != Some(Errno::ECHILD) {
                 error!("error polling pid status: {}", err);
@@ -556,12 +361,12 @@ pub fn main() {
                 ),
         )
         .subcommand(
-            SubCommand::with_name("start")
-                .arg(
-                    Arg::with_name("id")
-                        .required(true)
-                        .help("ID of the container")
-                        .help("starts the container process"))
+            SubCommand::with_name("start").arg(
+                Arg::with_name("id")
+                    .required(true)
+                    .help("ID of the container")
+                    .help("starts the container process"),
+            ),
         )
         .subcommand(
             SubCommand::with_name("kill")
@@ -619,9 +424,7 @@ pub fn main() {
                     .map(|s| Some(s.to_string()))
                     .unwrap_or(None),
                 root: args.value_of("root").unwrap_or(PURA_ROOT_PATH).to_string(),
-                pid_file: args
-                    .value_of("pid-file")
-                    .map(|p| p.to_string()),
+                pid_file: args.value_of("pid-file").map(|p| p.to_string()),
             })
         }
         ("start", start_cmd) => {
