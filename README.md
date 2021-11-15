@@ -22,6 +22,8 @@ The goal of **Pura** was to learn how container runtimes work and how container 
 - Ubuntu 18.04 & 20.04
 - OpenSUSE 15
 
+**Pura** is the codebase for [Container Runtime in Rust](https://itnext.io/container-runtime-in-rust-part-0-7af709415cda), a 3 part series on container runtimes in general, Linux features that CRs use and some implementation details explained.
+
 ## Build
 
 Prerequisites:
