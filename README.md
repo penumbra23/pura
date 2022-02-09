@@ -58,12 +58,12 @@ or it can be integrated with Docker:
 # init-based
 sudo service docker stop
 # systemd-based
-sudo systemctl stop docker
+sudo systemctl stop docker.sock
 
 # run dockerd manually
-sudo dockerd -H unix:///var/run/docker.sock --runtime pura=/pura-repo/target/release/pura
+sudo dockerd -H unix:///var/run/docker.sock --add-runtime pura=/pura-repo/target/release/pura
 
-docker run -it --runtime pura alpine /bin/sh
+[sudo] docker run -it --runtime pura alpine /bin/sh
 / # cat /etc/os-release
 NAME="Alpine Linux"
 ID=alpine
