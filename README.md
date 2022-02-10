@@ -60,8 +60,11 @@ sudo service docker stop
 # systemd-based
 sudo systemctl stop docker
 
+# try to use this
+[Rootless mode](https://docs.docker.com/engine/security/rootless/)
+
 # run dockerd manually
-sudo dockerd -H unix:///var/run/docker.sock --runtime pura=/pura-repo/target/release/pura
+[sudo] dockerd -H unix:///var/run/docker.sock --add-runtime pura=/pura-repo/target/release/pura
 
 docker run -it --runtime pura alpine /bin/sh
 / # cat /etc/os-release
