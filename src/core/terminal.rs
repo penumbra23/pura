@@ -104,7 +104,7 @@ impl PtySocket {
             &SockAddr::Unix(UnixAddr::new(console_socket_path.as_str()).unwrap()),
         )
         .map_err(|err| Error {
-            msg: fromat!("error connecting pty {}", err),
+            msg: format!("error connecting pty {}", err),
             err_type: ErrorType::Runtime,
         })?;
 
