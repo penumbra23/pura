@@ -103,9 +103,11 @@ impl PtySocket {
             socket_fd,
             &SockAddr::Unix(UnixAddr::new(console_socket_path.as_str()).unwrap()),
         )
-        .map_err(|_| Error {
-            msg: "error opening console-socket".to_string(),
-            err_type: ErrorType::Runtime,
+        .map_err(|err| {
+            Error {
+                msg: format!("error opening console-socket {}", err),
+                err_type: ErrorType::Runtime,
+            }
         })?;
 
         Ok(PtySocket {

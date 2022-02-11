@@ -30,9 +30,11 @@ impl IpcParent {
             err_type: ErrorType::Runtime,
         })?;
 
-        bind(socket_raw_fd, &sockaddr).map_err(|_| Error {
-            msg: "unable to bind IPC socket".to_string(),
-            err_type: ErrorType::Runtime,
+        bind(socket_raw_fd, &sockaddr).map_err(|err| {
+            Error {
+                msg: format!("unable to bind IPC parent socket {} for {}", err, path),
+                err_type: ErrorType::Runtime,
+            }
         })?;
 
         listen(socket_raw_fd, 10).map_err(|err| Error {
@@ -149,9 +151,11 @@ impl IpcChannel {
             err_type: ErrorType::Runtime,
         })?;
 
-        bind(socket_raw_fd, &sockaddr).map_err(|_| Error {
-            msg: "unable to bind IPC socket".to_string(),
-            err_type: ErrorType::Runtime,
+        bind(socket_raw_fd, &sockaddr).map_err(|err| {
+            Error {
+                msg: format!("unable to bind IPC channel socket {} for {}", err, path),
+                err_type: ErrorType::Runtime,
+            }
         })?;
 
         listen(socket_raw_fd, 10).map_err(|_| Error {
