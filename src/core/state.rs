@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, convert::TryFrom, io::Write, path::Path};
+use std::{collections::HashMap, convert::TryFrom, io::Write, path::{Path, PathBuf}};
 
 use crate::core::common::{Result, Error, ErrorType};
 
@@ -19,7 +19,7 @@ pub struct State {
     pub id: String,
     pub status: Status,
     pub pid: u64,
-    pub bundle: String,
+    pub bundle: PathBuf,
     pub annotations: Option<HashMap<String, String>>,
 }
 
@@ -32,7 +32,7 @@ impl State {
             id: id.clone(),
             pid: pid,
             status: Status::Creating,
-            bundle: bundle.clone(),
+            bundle: Path::new(bundle).canonicalize().unwrap(),
             annotations: Some(HashMap::<String, String>::new()),
         }
     }
@@ -45,7 +45,7 @@ impl State {
             .create(true)
             .open(root_path.join("state.json"))
             .map_err(|err| Error {
-                msg: err.to_string(),
+                msg: format!("save state failed {} for {:?}", err, root_path),
                 err_type: ErrorType::Container,
             })?;
         state_file
