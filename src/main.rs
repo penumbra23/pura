@@ -248,7 +248,7 @@ pub fn delete(delete: Delete) {
 
     // Just log the error
     if state.status != Status::Stopped {
-        error!("[DELETE] container isn't created");
+        error!("[DELETE] container isn't created in {:?} for {:?}", delete.root, delete.id);
     }
 
     if let Some(hooks) = &spec.hooks {
