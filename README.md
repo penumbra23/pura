@@ -44,35 +44,15 @@ cargo build --release
 
 **Pura** can be used as a standalone container runtime like **runc** with the OCI compliant commands:
 
-Make this to clean the way:
-```sh
-set ID=example
-[sudo] unlink /tmp/pura/${ID}/init.sock
-[sudo] unlink /tmp/pura/${ID}/container.sock
-```
-
-On another terminal:
-```sh
-[sudo] nc -vklU /tmp/${ID}.sock # on another terminal
-```
-
-On the config.json
-```sh
-...
-"root": {
-  "path": "/path/to/rootfs"
-}
-...
-```
-
-Now on pura context
 ```sh
 cd target/release
-./pura create ${ID} --bundle /path/to/bundle --console-sock /tmp/${ID}.sock
-./pura start ${ID}
-./pura state ${ID}
-./pura delete ${ID}
+./pura create example --bundle /path/to/bundle
+./pura start example
+./pura state example
+./pura delete example
 ```
+
+If you encounter some error to run pura from build check the NOTES.md
 
 or it can be integrated with Docker:
 ```bash
