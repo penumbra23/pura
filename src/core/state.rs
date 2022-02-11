@@ -62,9 +62,11 @@ impl TryFrom<&Path> for State {
     type Error = Error;
 
     fn try_from(path: &Path) -> core::result::Result<Self, Self::Error> {
-        let state_json = std::fs::read_to_string(path.join("state.json")).map_err(|_| Error {
-            msg: "state file not found".to_string(),
-            err_type: ErrorType::Runtime,
+        let state_json = std::fs::read_to_string(path.join("state.json")).map_err(|err| {
+            Error {
+                msg: format!("state file not found {} for {:?}", err, path),
+                err_type: ErrorType::Runtime,
+            }
         })?;
         let state: State = serde_json::from_str(&state_json).map_err(|_| Error {
             msg: "unable to deserialize state file".to_string(),

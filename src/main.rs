@@ -248,7 +248,7 @@ pub fn delete(delete: Delete) {
 
     // Just log the error
     if state.status != Status::Stopped {
-        error!("[DELETE] container isn't created");
+        error!("[DELETE] container isn't created in {:?} for {:?}", delete.root, delete.id);
     }
 
     if let Some(hooks) = &spec.hooks {
@@ -414,7 +414,10 @@ pub fn main() {
         ("create", create_cmd) => {
             let args = create_cmd.unwrap();
             create(Create {
-                id: args.value_of("id").expect("id is required").to_string(),
+                id: args
+                    .value_of("id")
+                    .expect("id is required")
+                    .to_string(),
                 bundle: args
                     .value_of("bundle")
                     .expect("bundle is required")

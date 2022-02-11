@@ -188,9 +188,11 @@ pub fn mount_rootfs(rootfs: &Path) -> Result<()> {
         MsFlags::MS_BIND | MsFlags::MS_REC,
         None::<&str>,
     )
-    .map_err(|_| Error {
-        msg: "mount rootfs failed".to_string(),
-        err_type: ErrorType::Container,
+    .map_err(|err| {
+        Error {
+            msg: format!("mount rootfs failed {} for {:?}", err, rootfs),
+            err_type: ErrorType::Container,
+        }
     })?;
 
     Ok(())

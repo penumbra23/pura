@@ -44,13 +44,15 @@ cargo build --release
 
 **Pura** can be used as a standalone container runtime like **runc** with the OCI compliant commands:
 
-```
+```sh
 cd target/release
-./pura create id123456789 --bundle /path/to/bundle
-./pura start id123456789
-./pura state id123456789
-./pura delete id123456789
+./pura create example --bundle /path/to/bundle
+./pura start example
+./pura state example
+./pura delete example
 ```
+
+If you encounter some error to run pura from build check the NOTES.md
 
 or it can be integrated with Docker:
 ```bash
