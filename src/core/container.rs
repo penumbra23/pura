@@ -39,7 +39,7 @@ use super::{
 /// # Returns
 ///
 /// Pid of the running container process inside the root PID namespace
-/// 
+///
 pub fn fork_container(
     spec: &Spec,
     state: &State,
@@ -208,12 +208,12 @@ pub fn fork_container(
                 match ipc_channel.recv() {
                     Ok(msg) => {
                         if !msg.eq("start") {
-                            println!("[ERROR]: {}", msg);
+                            println!("[ERROR]: {} on ipc channel msg", msg);
                             exit(1);
                         }
                     }
                     Err(err) => {
-                        println!("[ERROR]: {}", err);
+                        println!("[ERROR]: {} on ipc channel error", err);
                         exit(1);
                     }
                 }
@@ -228,7 +228,7 @@ pub fn fork_container(
                     Ok(_) => (),
                     Err(err) => {
                         // We can't log this error because it doesn't see the log file
-                        println!("[ERROR]: {}", err.to_string());
+                        println!("[ERROR]: {} execvp", err);
                         exit(1);
                     }
                 }
