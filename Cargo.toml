@@ -14,6 +14,8 @@ nix = "0.21.0"
 log = { version = "0.4.14", features = ["std"] }
 lazy_static = "1.4.0"
 chrono = "0.4"
+anyhow = "1.0"
+oci-spec = { git = "https://github.com/containers/oci-spec-rs",  rev = "d6fb1e91742313cd0d0085937e2d6df5d4669720" }
 
 [dev-dependencies]
 serial_test = "0.5.1"

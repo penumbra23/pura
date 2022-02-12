@@ -29,7 +29,103 @@ use oci::{
     spec::Spec,
 };
 
+use anyhow::Result;
+use nix;
+use oci_spec::runtime::Mount;
+use oci_spec::runtime::{
+    LinuxBuilder, LinuxIdMappingBuilder, LinuxNamespace, LinuxNamespaceBuilder, LinuxNamespaceType,
+    Spec as SpecConfigOci,
+};
+use serde_json::to_writer_pretty;
+use std::fs::File;
+use std::path::PathBuf;
+
 const PURA_ROOT_PATH: &str = "/tmp/pura";
+
+pub struct SpecConfig {
+    rootless: bool
+}
+
+pub fn get_default() -> Result<SpecConfigOci> {
+    Ok(SpecConfigOci::default())
+}
+
+pub fn get_rootless() -> Result<SpecConfigOci> {
+    // Remove network and user namespace from the default spec
+    let mut namespaces: Vec<LinuxNamespace> = oci_spec::runtime::get_default_namespaces()
+        .into_iter()
+        .filter(|ns| {
+            ns.typ() != LinuxNamespaceType::Network && ns.typ() != LinuxNamespaceType::User
+        })
+        .collect();
+
+    // Add user namespace
+    namespaces.push(
+        LinuxNamespaceBuilder::default()
+            .typ(LinuxNamespaceType::User)
+            .build()?,
+    );
+
+    let uid = nix::unistd::geteuid().as_raw();
+    let gid = nix::unistd::getegid().as_raw();
+
+    let linux = LinuxBuilder::default()
+        .namespaces(namespaces)
+        .uid_mappings(vec![LinuxIdMappingBuilder::default()
+            .host_id(uid)
+            .container_id(0_u32)
+            .size(1_u32)
+            .build()?])
+        .gid_mappings(vec![LinuxIdMappingBuilder::default()
+            .host_id(gid)
+            .container_id(0_u32)
+            .size(1_u32)
+            .build()?])
+        .build()?;
+
+    // Prepare the mounts
+
+    let mut mounts: Vec<Mount> = oci_spec::runtime::get_default_mounts();
+    for mount in &mut mounts {
+        if mount.destination().eq(Path::new("/sys")) {
+            mount
+                .set_source(Some(PathBuf::from("/sys")))
+                .set_typ(Some(String::from("none")))
+                .set_options(Some(vec![
+                    "rbind".to_string(),
+                    "nosuid".to_string(),
+                    "noexec".to_string(),
+                    "nodev".to_string(),
+                    "ro".to_string(),
+                ]));
+        } else {
+            let options: Vec<String> = mount
+                .options()
+                .as_ref()
+                .unwrap_or(&vec![])
+                .iter()
+                .filter(|&o| !o.starts_with("gid=") && !o.starts_with("uid="))
+                .map(|o| o.to_string())
+                .collect();
+            mount.set_options(Some(options));
+        }
+    }
+
+    let mut spec = get_default()?;
+    spec.set_linux(Some(linux)).set_mounts(Some(mounts));
+    Ok(spec)
+}
+
+pub fn spec(spec: SpecConfig) -> Result<()> {
+    let spec = if spec.rootless {
+        get_rootless()?
+    } else {
+        get_default()?
+    };
+
+    to_writer_pretty(&File::create("config.json")?, &spec)?;
+    Ok(())
+}
 
 pub fn create(create: Create) {
     let container_id = create.id;
@@ -333,6 +429,16 @@ pub fn main() {
         )
         // Subcommands
         .subcommand(
+            SubCommand::with_name("spec")
+                .arg(
+                    Arg::with_name("rootless")
+                        .long("rootless")
+                        .required(false)
+                        .takes_value(false)
+                        .help("spec container as rootless mode")
+                ),
+        )
+        .subcommand(
             SubCommand::with_name("create")
                 .arg(
                     Arg::with_name("bundle")
@@ -411,6 +517,17 @@ pub fn main() {
     let _ = ContainerLogger::init(&log_path.unwrap(), Level::Info).unwrap();
 
     match matches.subcommand() {
+        ("spec", _spec_cmd) => {
+            // spec(SpecConfig {
+            //     rootless: matches.is_present("rootless")
+            // }).map_err(|err| println!("{:?}", err));
+            match spec(SpecConfig {
+                rootless: matches.is_present("rootless")
+            }) {
+                Err(e) => println!("{:?}", e),
+                _ => () 
+            }
+        }
         ("create", create_cmd) => {
             let args = create_cmd.unwrap();
             create(Create {
